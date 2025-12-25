@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Mitch's Coffee</title>
+
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/lucide@latest"></script>
+
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700;900&display=swap');
+    body { font-family: 'Inter', sans-serif; -webkit-tap-highlight-color: transparent; }
+    .animate-in { animation: fadeIn .4s ease-out; }
+    @keyframes fadeIn {
+      from { opacity:0; transform:translateY(8px); }
+      to { opacity:1; transform:translateY(0); }
+    }
+    .pulse-amber { animation:pulse 2s infinite; }
+    @keyframes pulse { 0%,100%{opacity:1}50%{opacity:.5} }
+  </style>
+</head>
+
+<body class="bg-stone-50 pb-20">
+<div id="app"></div>
+
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-app.js";
+import { getFirestore, collection, addDoc, onSnapshot, doc, updateDoc, deleteDoc, serverTimestamp }
+from "https://www.gstatic.com/firebasejs/11.0.2/firebase-firestore.js";
+import { getAuth, signInAnonymously, onAuthStateChanged }
+from "https://www.gstatic.com/firebasejs/11.0.2/firebase-auth.js";
+
+/* ================= CONFIG ================= */
+
+const firebaseConfig = {
+  apiKey: "AIzaSyCMcxuH-8Pc0t8eC71xOU8TXLu0ZoF-RG4",
+  authDomain: "mitches-coffee.firebaseapp.com",
+  projectId: "mitches-coffee",
+  storageBucket: "mitches-coffee.firebasestorage.app",
+  messagingSenderId: "789709713646",
+  appId: "1:789709713646:web:3f09ce026b40a85b3f03ff"
+};
+
+const appId = "mitchs-coffee";
+const ADMIN_CODE = "222";
+
+/* ================= STATE ================= */
+
+let db, auth;
+
+let state = {
+  user: null,
+  isLoggedIn: false,
+  customerName: "",
+  orders: [],
+  cart: [],
+  notification: null
+};
+
+/* ================= ID HELPERS ================= */
+
+// Persistent browser ID (very simple)
+function getLocalId() {
+  let id = localStorage.getItem("mitch_local_id");
+  if (!id) {
+    id = Math.random().toString(36).slice(2, 10);
+    localStorage.setItem("mitch_local_id", id);
+  }
+  return id;
+}
+
+const localId = getLocalId();
+
+function shortId(uid) {
+  return uid.slice(0, 6).toUpperCase();
+}
+
+function showToast(msg) {
+  state.notification = msg;
+  render();
+  setTimeout(() => {
+    state.notification = null;
+    render();
+  }, 3000);
+}
+
+/* ================= INIT ================= */
+
+async function init() {
+  const app = initializeApp(firebaseConfig);
+  db = getFirestore(app);
+  auth = getAuth(app);
+
+  await signInAnonymously(auth);
+
+  onAuthStateChanged(auth, user => {
+    state.user = user;
+    if (user) listenOrders();
+    render();
+  });
+}
+
+function listenOrders() {
+  const ref = collection(db, "artifacts", appId, "public", "data", "orders");
+  onSnapshot(ref, snap => {
+    state.orders = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    render();
+  });
+}
+
+/* ================= ACTIONS ================= */
+
+window.login = e => {
+  e.preventDefault();
+  const name = document.getElementById("loginName").value.trim();
+  if (!name) return;
+  state.customerName = name;
+  state.isLoggedIn = true;
+  render();
+};
+
+window.add = () => {
+  state.cart.push({ name: "Hot Latte", qty: 1 });
+  render();
+};
+
+window.order = async () => {
+  if (!state.cart.length) return showToast("Cart empty");
+
+  await addDoc(collection(db,"artifacts",appId,"public","data","orders"),{
+    customerName: state.customerName,
+    customerTag: shortId(state.user.uid),
+    userId: state.user.uid,
+    localId,
+    items: state.cart,
+    status: "pending",
+    timestamp: serverTimestamp()
+  });
+
+  state.cart = [];
+  showToast("Order sent!");
+};
+
+/* ================= UI ================= */
+
+function render() {
+  const root = document.getElementById("app");
+
+  if (!state.isLoggedIn) {
+    root.innerHTML = `
+      <div class="min-h-screen flex items-center justify-center">
+        <form onsubmit="login(event)" class="bg-white p-8 rounded-3xl shadow-xl space-y-4">
+          <h1 class="text-3xl font-black italic text-center">Mitch's Coffee</h1>
+          <input id="loginName" placeholder="Your name"
+            class="w-full border-2 rounded-2xl px-4 py-3 font-bold">
+          <button class="w-full bg-stone-900 text-white py-3 rounded-2xl font-black">
+            Start Ordering
+          </button>
+        </form>
+      </div>`;
+    return;
+  }
+
+  const myOrder = state.orders.find(o =>
+    o.status !== "completed" && (
+      o.userId === state.user?.uid ||
+      o.localId === localId ||
+      o.customerName === state.customerName
+    )
+  );
+
+  root.innerHTML = `
+    <header class="p-4 bg-white shadow flex justify-between">
+      <h1 class="font-black italic">Mitch's</h1>
+      <span class="text-xs font-black text-stone-400">
+        ID: #${shortId(state.user.uid)}
+      </span>
+    </header>
+
+    <main class="p-4 space-y-6">
+      ${myOrder ? `
+        <div class="bg-white p-6 rounded-3xl border-4
+          ${myOrder.status==="ready"?"border-green-500":"border-amber-500"}">
+          <div class="text-xs font-black text-stone-400 mb-2">
+            Order ID: #${myOrder.customerTag}
+          </div>
+          <h2 class="text-2xl font-black uppercase">
+            Status: ${myOrder.status}
+          </h2>
+          <div class="mt-4 h-4 bg-stone-100 rounded-full overflow-hidden">
+            <div class="h-full bg-amber-500"
+              style="width:${myOrder.status==="pending"?"33%":myOrder.status==="brewing"?"66%":"100%"}"></div>
+          </div>
+        </div>
+      ` : ""}
+
+      <button onclick="add()"
+        class="w-full bg-amber-600 text-white py-4 rounded-2xl font-black">
+        Add Latte
+      </button>
+
+      ${state.cart.length ? `
+        <button onclick="order()"
+          class="w-full bg-stone-900 text-white py-4 rounded-2xl font-black">
+          Place Order
+        </button>
+      ` : ""}
+    </main>
+
+    ${state.notification ? `
+      <div class="fixed top-4 left-4 right-4 bg-black text-white p-3 rounded-xl text-center font-black">
+        ${state.notification}
+      </div>` : ""}
+  `;
+
+  lucide.createIcons();
+}
+
+init();
+</script>
+</body>
+</html>
