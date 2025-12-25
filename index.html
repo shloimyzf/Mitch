@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Mitch's Coffee</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700;900&display=swap');
+    body { font-family: 'Inter', sans-serif; -webkit-tap-highlight-color: transparent; }
+    .animate-in { animation: fadeIn 0.4s ease-out; }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+    .pulse-amber { animation: pulse 2s infinite; }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.5} }
+  </style>
+</head>
+
+<body class="bg-stone-50 pb-20">
+<div id="app"></div>
+
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-app.js";
+import { getFirestore, collection, addDoc, onSnapshot, doc, updateDoc, deleteDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-firestore.js";
+import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-auth.js";
+
+/* FIREBASE */
+const firebaseConfig = {
+  apiKey: "AIzaSyCMcxuH-8Pc0t8eC71xOU8TXLu0ZoF-RG4",
+  authDomain: "mitches-coffee.firebaseapp.com",
+  projectId: "mitches-coffee",
+  storageBucket: "mitches-coffee.firebasestorage.app",
+  messagingSenderId: "789709713646",
+  appId: "1:789709713646:web:3f09ce026b40a85b3f03ff"
+};
+
+const appId = "mitchs-coffee";
+const ADMIN_CODE = "222";
+
+let db, auth;
+let state = {
+  user: null,
+  isLoggedIn: false,
+  customerName: "",
+  orders: [],
+  cart: [],
+  selectedSize: "Small",
+  syrupType: "None",
+  syrupPumps: 0,
+  isDelivery: false,
+  view: "customer",
+  isAdminAuth: false,
+  notification: null
+};
+
+/* MENU */
+const MENU_ITEMS = [
+  { id:'hot-latte', name:'Hot Latte', category:'Lattes', type:'drink' },
+  { id:'iced-latte', name:'Iced Latte', category:'Lattes', type:'drink' },
+  { id:'choc-chip', name:'Chocolate Chip Cookie', category:'Cookies', type:'cookie' }
+];
+const CATEGORIES = ['Lattes','Cookies'];
+
+/* INIT */
+async function init(){
+  const app = initializeApp(firebaseConfig);
+  db = getFirestore(app);
+  auth = getAuth(app);
+  await signInAnonymously(auth);
+
+  onAuthStateChanged(auth,user=>{
+    state.user = user;
+    const saved = localStorage.getItem("mitchName");
+    if(saved){ state.customerName = saved; state.isLoggedIn = true; }
+    listenOrders();
+    render();
+  });
+}
+
+function listenOrders(){
+  const ref = collection(db,"artifacts",appId,"public","data","orders");
+  onSnapshot(ref,snap=>{
+    state.orders = snap.docs.map(d=>({id:d.id,...d.data()}));
+    render();
+  });
+}
+
+/* ACTIONS */
+window.login = e=>{
+  e.preventDefault();
+  const name = document.getElementById("loginName").value.trim();
+  if(!name) return;
+  localStorage.setItem("mitchName",name);
+  state.customerName = name;
+  state.isLoggedIn = true;
+  render();
+};
+
+window.add = id=>{
+  const item = MENU_ITEMS.find(i=>i.id===id);
+  const price = item.type==='drink' ? (state.selectedSize==='Small'?5:6) : 1;
+  const existing = state.cart.find(c=>c.id===id);
+  if(existing) existing.qty++;
+  else state.cart.push({...item, qty:1, price});
+  render();
+};
+
+window.inc = i=>{ state.cart[i].qty++; render(); };
+window.dec = i=>{
+  if(state.cart[i].qty>1) state.cart[i].qty--;
+  else state.cart.splice(i,1);
+  render();
+};
+
+window.setDelivery = v=>{ state.isDelivery = v; render(); };
+
+window.order = async()=>{
+  if(!state.cart.length) return;
+  const total = state.cart.reduce((s,i)=>s+i.price*i.qty,0)+(state.isDelivery?1:0);
+  await addDoc(collection(db,"artifacts",appId,"public","data","orders"),{
+    customerName: state.customerName,
+    items: state.cart,
+    total,
+    isDelivery: state.isDelivery,
+    status:"pending",
+    userId: state.user.uid,
+    timestamp: serverTimestamp()
+  });
+  state.cart=[];
+  state.isDelivery=false;
+  render();
+};
+
+/* RENDER */
+function render(){
+  const root=document.getElementById("app");
+  if(!state.isLoggedIn){
+    root.innerHTML=`
+      <div class="min-h-screen flex items-center justify-center">
+        <form onsubmit="login(event)" class="bg-white p-8 rounded-3xl shadow-xl space-y-4">
+          <h1 class="text-2xl font-black">Mitch's Coffee</h1>
+          <input id="loginName" placeholder="Your name" class="border p-3 rounded-xl w-full" />
+          <button class="bg-amber-600 text-white w-full py-3 rounded-xl font-black">Enter</button>
+        </form>
+      </div>`;
+    return;
+  }
+
+  const myOrder = state.orders.find(o=>o.userId===state.user?.uid && o.status!=="completed");
+  const cartTotal = state.cart.reduce((s,i)=>s+i.price*i.qty,0)+(state.isDelivery?1:0);
+
+  root.innerHTML=`
+  <main class="max-w-md mx-auto p-4 space-y-6">
+
+  ${myOrder?`
+    <div class="bg-white p-6 rounded-3xl border-4 ${myOrder.status==='ready'?'border-green-400':'border-amber-400'}">
+      <p class="font-black uppercase">Status: ${myOrder.status}</p>
+      <div class="h-4 bg-stone-100 rounded-full overflow-hidden mt-3">
+        <div class="h-full ${myOrder.status==='ready'?'bg-green-500':'bg-amber-500'}"
+          style="width:${myOrder.status==='pending'?33:myOrder.status==='brewing'?66:100}%"></div>
+      </div>
+    </div>`:""}
+
+  ${state.cart.length?`
+    <div class="bg-stone-900 text-white p-6 rounded-3xl space-y-4">
+      ${state.cart.map((i,idx)=>`
+        <div class="flex justify-between items-center">
+          <span>${i.qty}x ${i.name}</span>
+          <div class="flex gap-2 items-center">
+            <button type="button" onclick="dec(${idx})">➖</button>
+            <button type="button" onclick="inc(${idx})">➕</button>
+            <span>$${(i.qty*i.price).toFixed(2)}</span>
+          </div>
+        </div>`).join("")}
+
+      <div class="flex gap-2">
+        <button type="button" onclick="setDelivery(false)" class="flex-1 ${!state.isDelivery?'bg-amber-600':'bg-stone-700'} py-2 rounded-xl">Pickup</button>
+        <button type="button" onclick="setDelivery(true)" class="flex-1 ${state.isDelivery?'bg-blue-600':'bg-stone-700'} py-2 rounded-xl">Delivery</button>
+      </div>
+
+      <button onclick="order()" class="bg-amber-600 w-full py-3 rounded-xl font-black">
+        Place Order • $${cartTotal.toFixed(2)}
+      </button>
+    </div>`:""}
+
+  ${CATEGORIES.map(cat=>`
+    <section>
+      <h2 class="font-black text-xl">${cat}</h2>
+      ${MENU_ITEMS.filter(i=>i.category===cat).map(i=>`
+        <div class="bg-white p-4 rounded-2xl flex justify-between items-center mt-2">
+          <span>${i.name}</span>
+          <button onclick="add('${i.id}')" class="bg-stone-900 text-white p-3 rounded-xl">+</button>
+        </div>`).join("")}
+    </section>`).join("")}
+
+  </main>`;
+  lucide.createIcons();
+}
+
+init();
+</script>
+</body>
+</html>
