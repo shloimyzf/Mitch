@@ -1,11 +1,11 @@
 {
   "name": "Mitch's Coffee",
-  "short_name": "Mitch's",
+  "short_name": "Mitch's Coffee",
   "start_url": ".",
   "scope": ".",
   "display": "standalone",
-  "background_color": "#924E23",
-  "theme_color": "#924E23",
+  "background_color": "#E2CB9F",
+  "theme_color": "#E2CB9F",
   "orientation": "portrait",
   "icons": [
     {
@@ -22,3 +22,4 @@
     }
   ]
 }
+
