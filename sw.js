@@ -21,7 +21,6 @@ messaging.onBackgroundMessage((payload) => {
   self.registration.showNotification(notificationTitle, notificationOptions);
 });
 
-// --- ADDED THIS TO FIX THE "STUCK" ISSUE ---
 self.addEventListener('install', (event) => {
     self.skipWaiting();
 });
