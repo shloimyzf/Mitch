@@ -37,6 +37,12 @@
 </head>
 <body class="select-none pb-32">
 
+<script>
+    window.onerror = function(msg, url, line) {
+        alert("STOP! ERROR FOUND:\n" + msg + "\nLine: " + line);
+    };
+</script>
+
 <div id="main-view">
   <div class="min-h-screen flex flex-col items-center justify-center gap-4">
     <div class="animate-spin rounded-full h-12 w-12 border-b-4 border-[#432818]"></div>
