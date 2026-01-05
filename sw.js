@@ -20,3 +20,12 @@ messaging.onBackgroundMessage((payload) => {
 
   self.registration.showNotification(notificationTitle, notificationOptions);
 });
+
+// --- FORCE UPDATE (Fixes the "Stuck" issue) ---
+self.addEventListener('install', (event) => {
+    self.skipWaiting(); // Installs immediately
+});
+
+self.addEventListener('activate', (event) => {
+    event.waitUntil(self.clients.claim()); // Takes control immediately
+});
