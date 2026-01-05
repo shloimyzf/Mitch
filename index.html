@@ -27,15 +27,22 @@
     body { font-family: 'Inter', sans-serif; -webkit-tap-highlight-color: transparent; overscroll-behavior-y: none; background-color: #E2CB9F; color: #432818; }
     .animate-in { animation: fadeIn 0.4s ease-out; }
     @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+    .modal-enter { animation: slideUp 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
+    @keyframes slideUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
+    .menu-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 0.75rem; }
     .menu-card { aspect-ratio: 1 / 1; display: flex; flex-direction: column; justify-content: flex-end; background-size: cover; background-position: center; position: relative; overflow: hidden; }
     .menu-card::after { content: ''; position: absolute; inset: 0; background: linear-gradient(to top, rgba(226, 203, 159, 1) 0%, rgba(226, 203, 159, 0.7) 35%, rgba(0,0,0,0) 100%); z-index: 1; }
+    .btn-disabled { opacity: 0.5; pointer-events: none; filter: grayscale(1); }
   </style>
 </head>
 <body class="select-none pb-32">
 
 <script>
     window.onerror = function(msg, url, line) {
-        if(!msg.includes("ResizeObserver")) alert("ERROR:\n" + msg);
+        // Only show alert if it's NOT the resizing error (common in editors)
+        if(!msg.includes("ResizeObserver")) {
+             alert("ERROR:\n" + msg + "\nLine: " + line);
+        }
     };
 </script>
 
@@ -50,10 +57,10 @@
 <div id="toast-layer" class="fixed top-4 left-4 right-4 z-[60] pointer-events-none"></div>
 
 <script type="module">
-  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
-  import { getFirestore, collection, addDoc, onSnapshot, doc, setDoc, serverTimestamp, deleteDoc } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
-  import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
-  import { getMessaging, getToken, onMessage } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-messaging.js";
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-app.js";
+  import { getFirestore, collection, addDoc, onSnapshot, doc, setDoc, serverTimestamp, deleteDoc } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-firestore.js";
+  import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-auth.js";
+  import { getMessaging, getToken, onMessage } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-messaging.js";
 
   const firebaseConfig = {
     apiKey: "AIzaSyCMcxuH-8Pc0t8eC71xOU8TXLu0ZoF-RG4",
@@ -65,6 +72,7 @@
   };
 
   const VAPID_KEY = "BF3iJzRgdcJq3LAFW2cO5_5m-dGyzGhS74-_G4ty6O9lzftV92_inFFBP9ThuDAZ7FJd2V27VvNFgJsyOk8lzg4";
+  
   const appId = "mitchs-coffee";
   const EMAIL_SERVICE_ID = "service_m3qf2td";
   const EMAIL_TEMPLATE_ID = "template_c7bbquk"; 
@@ -106,12 +114,14 @@
     auth = getAuth(app);
     messaging = getMessaging(app);
 
-    // Register Service Worker
+    // 1. REGISTER 'sw.js'
     if ('serviceWorker' in navigator) {
         try {
             const reg = await navigator.serviceWorker.register('sw.js');
             console.log("Service Worker Registered:", reg);
-        } catch (err) { console.error("SW Fail:", err); }
+        } catch (err) {
+            console.error("SW Registration Failed:", err);
+        }
     }
 
     await signInAnonymously(auth);
@@ -132,7 +142,7 @@
     setInterval(() => { if(state.isLoggedIn) renderMain(); }, 15000); 
   }
 
-  // UPDATED PERMISSION FUNCTION
+  // --- THE FIX IS HERE ---
   window.requestPushPermission = async (silent = false) => {
     try {
         if (!silent) {
@@ -140,9 +150,10 @@
             if (permission !== 'granted') return showToast("Permission Denied");
         }
         
+        // 1. GET THE REGISTRATION FIRST
         const registration = await navigator.serviceWorker.getRegistration();
-        
-        // Use VAPID Key to get token
+
+        // 2. TELL FIREBASE TO USE IT (Instead of looking for firebase-messaging-sw.js)
         const token = await getToken(messaging, { 
             vapidKey: VAPID_KEY,
             serviceWorkerRegistration: registration 
@@ -150,10 +161,11 @@
         
         if (token) {
             state.fcmToken = token;
+            console.log("FCM Token:", token);
             if(!silent) showToast("Notifications Enabled! ✅");
             renderMain();
         } else {
-            if(!silent) alert("Error: No Token received.");
+            if(!silent) alert("Error: No Token received from Firebase.");
         }
     } catch (err) {
         console.error("Push Error:", err);
@@ -161,7 +173,6 @@
     }
   };
 
-  /* --- STANDARD APP LOGIC --- */
   function setupIdentity() {
     let storedId = localStorage.getItem('mitch_device_id');
     if (!storedId) { storedId = 'user_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9); localStorage.setItem('mitch_device_id', storedId); }
@@ -221,10 +232,18 @@
       state.modal = { isOpen: true, item, size, syrup, pumps, milk };
       renderModal();
   };
+
   window.closeModal = () => { state.modal.isOpen = false; renderModal(); setTimeout(() => { state.modal.item = null; }, 200); };
-  window.updateModalState = (key, value) => { state.modal[key] = value; renderModal(); };
-  window.changeModalPumps = (d) => { state.modal.pumps = Math.max(0, Math.min(8, state.modal.pumps + d)); renderModal(); };
   
+  window.updateModalState = (key, value) => {
+      state.modal[key] = value;
+      if (key === 'size' && state.modal.syrup && state.modal.syrup !== 'None') state.modal.pumps = (value === 'Small') ? 3 : 4;
+      if (key === 'syrup') state.modal.pumps = (value === 'None') ? 0 : (state.modal.size === 'Small' ? 3 : 4);
+      renderModal();
+  };
+
+  window.changeModalPumps = (d) => { state.modal.pumps = Math.max(0, Math.min(8, state.modal.pumps + d)); renderModal(); };
+
   window.addToCartFromModal = () => {
       const { item, size, syrup, pumps, milk } = state.modal;
       const price = getPrice(item.id, size, milk);
@@ -232,6 +251,7 @@
       if (existing) existing.qty++; else state.cart.push({ ...item, size, price, syrupType: syrup, syrupPumps: pumps, milk, qty: 1 });
       state.modal.isOpen = false; renderModal(); renderMain(); 
   };
+
   window.removeCart = idx => { if (state.cart[idx].qty > 1) state.cart[idx].qty--; else state.cart.splice(idx, 1); renderMain(); };
   window.addCartQty = idx => { state.cart[idx].qty++; renderMain(); };
 
@@ -241,15 +261,21 @@
     sendTextToAdmin(state.customerName, state.dormRoom);
     try {
       await addDoc(collection(db, "artifacts", appId, "public", "data", "orders"), {
-        customerName: state.customerName, customerEmail: state.customerEmail,
-        dormRoom: state.dormRoom, items: state.cart, 
+        customerName: state.customerName, 
+        customerEmail: state.customerEmail,
+        dormRoom: state.dormRoom, 
+        items: state.cart, 
         total: state.cart.reduce((s, i) => s + (i.price * i.qty), 0),
-        isDelivery: state.isDelivery, status: "pending", 
-        timestamp: serverTimestamp(), userId: state.user.uid, deviceId: state.deviceId, 
+        isDelivery: state.isDelivery, 
+        status: "pending", 
+        timestamp: serverTimestamp(), 
+        userId: state.user.uid, 
+        deviceId: state.deviceId, 
         fcmToken: state.fcmToken 
       });
       state.cart = []; state.isDelivery = true; state.dormRoom = ""; 
-      showToast("Order Sent!"); renderMain();
+      showToast("Order Sent!");
+      renderMain();
     } catch(e) { showToast("Error sending order!"); console.error(e); }
   };
   
@@ -370,7 +396,96 @@
         lucide.createIcons();
     }
   }
-  function renderModal() { const container = document.getElementById("modal-layer"); const { isOpen, item, size, syrup, pumps, milk } = state.modal; if (!isOpen || !item) { container.innerHTML = ''; container.style.pointerEvents = 'none'; return; } container.style.pointerEvents = 'auto'; const isDrink = item.type === 'drink'; container.innerHTML = `<div class="absolute inset-0 bg-black/60 backdrop-blur-sm" onclick="closeModal()"></div><div id="modal-card" class="bg-[#E2CB9F] text-[#432818] w-full max-w-sm rounded-t-[2rem] sm:rounded-[2rem] p-6 relative z-10 shadow-2xl space-y-6 pb-10 modal-enter"><div class="flex justify-between items-start"><div><h2 class="text-3xl font-black leading-tight italic">${item.name}</h2><p id="modal-price" class="opacity-60 font-bold text-lg">$${(item.type==='drink' ? getPrice(item.id, size, milk) : getPrice(item.id)).toFixed(2)}</p></div><button onclick="closeModal()" class="bg-[#432818]/10 p-2 rounded-full"><i data-lucide="x" class="w-6 h-6"></i></button></div>${isDrink ? `<div class="space-y-4"><div><label class="text-xs font-black opacity-50 uppercase ml-1">Size</label><div class="bg-[#432818]/10 p-1 rounded-2xl flex mt-1"><button onclick="updateModalState('size', 'Small')" class="size-btn flex-1 py-4 rounded-xl text-sm font-black transition-all ${size==='Small'?'bg-[#432818] text-[#E2CB9F] shadow-lg':'opacity-50'}">Small</button><button onclick="updateModalState('size', 'Large')" class="size-btn flex-1 py-4 rounded-xl text-sm font-black transition-all ${size==='Large'?'bg-[#432818] text-[#E2CB9F] shadow-lg':'opacity-50'}">Large</button></div></div>${item.name.includes('Regular') && item.category === 'Lattes' ? `<div><label class="text-xs font-black opacity-50 uppercase ml-1">Flavor</label><div class="bg-[#432818]/10 p-1 rounded-2xl flex mt-1"><button onclick="updateModalState('syrup', 'Vanilla')" class="syrup-btn flex-1 py-4 rounded-xl text-sm font-black transition-all ${syrup==='Vanilla'?'bg-[#432818] text-[#E2CB9F] shadow-lg':'opacity-50'}">Vanilla</button><button onclick="updateModalState('syrup', 'Brown Sugar')" class="syrup-btn flex-1 py-4 rounded-xl text-sm font-black transition-all ${syrup==='Brown Sugar'?'bg-[#432818] text-[#E2CB9F] shadow-lg':'opacity-50'}">Brown Sugar</button><button onclick="updateModalState('syrup', null)" class="syrup-btn flex-1 py-4 rounded-xl text-sm font-black transition-all ${!syrup?'bg-[#432818] text-[#E2CB9F] shadow-lg':'opacity-50'}">None</button></div></div>` : ''}<div><label class="text-xs font-black opacity-50 uppercase ml-1">Milk</label><div class="bg-[#432818]/10 p-1 rounded-2xl flex mt-1"><button onclick="updateModalState('milk', 'Regular')" class="milk-btn flex-1 py-4 rounded-xl text-sm font-black transition-all ${milk==='Regular'?'bg-[#432818] text-[#E2CB9F] shadow-lg':'opacity-50'}">Regular</button><button onclick="updateModalState('milk', 'Oat')" class="milk-btn flex-1 py-4 rounded-xl text-sm font-black transition-all ${milk==='Oat'?'bg-[#432818] text-[#E2CB9F] shadow-lg':'opacity-50'}">Oat (+$1)</button></div></div></div>` : ''}<button id="modal-add-btn" onclick="addToCartFromModal()" class="w-full bg-[#432818] text-[#E2CB9F] py-5 rounded-2xl font-black text-xl shadow-xl active:scale-95 transition-all">Add to Order</button></div>`; lucide.createIcons(); }
+
+  function renderModal() {
+      const container = document.getElementById("modal-layer");
+      const { isOpen, item, size, syrup, pumps, milk } = state.modal;
+      
+      if (!isOpen || !item) { container.innerHTML = ''; container.style.pointerEvents = 'none'; return; }
+      container.style.pointerEvents = 'auto';
+      
+      const existingModal = document.getElementById('modal-card');
+      const shouldHavePumps = syrup && syrup !== 'None';
+      const hasPumpsContainer = document.getElementById('pumps-container');
+      const needsStructuralChange = (!!hasPumpsContainer) !== shouldHavePumps;
+
+      if (existingModal && !needsStructuralChange) {
+          const priceEl = document.getElementById('modal-price');
+          if(priceEl) priceEl.innerText = `$${(item.type==='drink' ? getPrice(item.id, size, milk) : getPrice(item.id)).toFixed(2)}`;
+          const pumpsEl = document.getElementById('modal-pumps');
+          if(pumpsEl) pumpsEl.innerText = pumps;
+          
+          document.querySelectorAll('.size-btn').forEach(btn => btn.className = `flex-1 py-4 rounded-xl text-sm font-black transition-all size-btn ${btn.dataset.size === size ? 'bg-[#432818] text-[#E2CB9F] shadow-lg' : 'opacity-50'}`);
+          document.querySelectorAll('.syrup-btn').forEach(btn => btn.className = `flex-1 py-4 rounded-xl text-sm font-black transition-all syrup-btn ${btn.dataset.syrup === syrup ? 'bg-[#432818] text-[#E2CB9F] shadow-lg' : 'opacity-50'}`);
+          document.querySelectorAll('.milk-btn').forEach(btn => btn.className = `flex-1 py-4 rounded-xl text-sm font-black transition-all milk-btn ${btn.dataset.milk === milk ? 'bg-[#432818] text-[#E2CB9F] shadow-lg' : 'opacity-50'}`);
+
+          const addBtn = document.getElementById('modal-add-btn');
+          const isRegLatte = item.name.includes('Regular') && item.category === 'Lattes';
+          const isDisabled = isRegLatte && !syrup;
+          if (addBtn) {
+              addBtn.disabled = isDisabled;
+              addBtn.innerText = isDisabled ? 'Select Flavor' : 'Add to Order';
+              addBtn.className = `w-full bg-[#432818] text-[#E2CB9F] py-5 rounded-2xl font-black text-xl shadow-xl active:scale-95 transition-all ${isDisabled ? 'btn-disabled' : ''}`;
+          }
+          return; 
+      }
+
+      let syrupName = 'Classic'; 
+      if (item.name.includes('Vanilla')) syrupName = 'Vanilla'; 
+      if (item.name.includes('Brown Sugar')) syrupName = 'Brown Sugar';
+      
+      const isDrink = item.type === 'drink';
+      const isRegLatte = item.name.includes('Regular') && item.category === 'Lattes';
+      const isVanilla = item.name.includes('Vanilla');
+      const isDisabled = isRegLatte && !syrup;
+
+      container.innerHTML = `
+        <div class="absolute inset-0 bg-black/60 backdrop-blur-sm" onclick="closeModal()"></div>
+        <div id="modal-card" class="bg-[#E2CB9F] text-[#432818] w-full max-w-sm rounded-t-[2rem] sm:rounded-[2rem] p-6 relative z-10 shadow-2xl space-y-6 pb-10 modal-enter">
+            <div class="flex justify-between items-start">
+                <div>
+                    <h2 class="text-3xl font-black leading-tight italic">${item.name}</h2>
+                    <p id="modal-price" class="opacity-60 font-bold text-lg">$${(item.type==='drink' ? getPrice(item.id, size, milk) : getPrice(item.id)).toFixed(2)}</p>
+                </div>
+                <button onclick="closeModal()" class="bg-[#432818]/10 p-2 rounded-full"><i data-lucide="x" class="w-6 h-6"></i></button>
+            </div>
+            ${isDrink ? `
+                <div class="space-y-4">
+                     <div>
+                         <label class="text-xs font-black opacity-50 uppercase ml-1">Size</label>
+                         <div class="bg-[#432818]/10 p-1 rounded-2xl flex mt-1">
+                            <button onclick="updateModalState('size', 'Small')" data-size="Small" class="size-btn flex-1 py-4 rounded-xl text-sm font-black transition-all ${size==='Small'?'bg-[#432818] text-[#E2CB9F] shadow-lg':'opacity-50'}">Small</button>
+                            <button onclick="updateModalState('size', 'Large')" data-size="Large" class="size-btn flex-1 py-4 rounded-xl text-sm font-black transition-all ${size==='Large'?'bg-[#432818] text-[#E2CB9F] shadow-lg':'opacity-50'}">Large</button>
+                         </div>
+                    </div>
+                    <div>
+                         <label class="text-xs font-black opacity-50 uppercase ml-1">Flavor</label>
+                         <div class="bg-[#432818]/10 p-1 rounded-2xl flex mt-1">
+                            <button onclick="updateModalState('syrup', '${syrupName}')" data-syrup="${syrupName}" class="syrup-btn flex-1 py-4 rounded-xl text-sm font-black transition-all ${syrup===syrupName?'bg-[#432818] text-[#E2CB9F] shadow-lg':'opacity-50'}">${syrupName}</button>
+                            ${!isVanilla ? `<button onclick="updateModalState('syrup', 'None')" data-syrup="None" class="syrup-btn flex-1 py-4 rounded-xl text-sm font-black transition-all ${syrup==='None'?'bg-[#432818] text-[#E2CB9F] shadow-lg':'opacity-50'}">No Syrup</button>` : ''}
+                         </div>
+                    </div>
+                    ${syrup && syrup !== 'None' ? `
+                        <div class="animate-in" id="pumps-container">
+                            <label class="text-xs font-black opacity-50 uppercase ml-1">Pumps</label>
+                            <div class="flex items-center justify-between bg-[#432818]/5 border-2 border-[#432818]/10 p-2 rounded-2xl mt-1">
+                                <button onclick="changeModalPumps(-1)" class="w-12 h-12 bg-[#E2CB9F] rounded-xl shadow-sm border border-[#432818]/20 flex items-center justify-center"><i data-lucide="minus" class="w-5 h-5 opacity-50"></i></button>
+                                <span id="modal-pumps" class="font-black text-3xl">${pumps}</span>
+                                <button onclick="changeModalPumps(1)" class="w-12 h-12 bg-[#432818] text-[#E2CB9F] rounded-xl shadow-lg flex items-center justify-center"><i data-lucide="plus" class="w-5 h-5"></i></button>
+                            </div>
+                        </div>` : ''}
+                    <div>
+                         <label class="text-xs font-black opacity-50 uppercase ml-1">Milk</label>
+                         <div class="bg-[#432818]/10 p-1 rounded-2xl flex mt-1">
+                            <button onclick="updateModalState('milk', 'Regular')" data-milk="Regular" class="milk-btn flex-1 py-4 rounded-xl text-sm font-black transition-all ${milk==='Regular'?'bg-[#432818] text-[#E2CB9F] shadow-lg':'opacity-50'}">Regular</button>
+                            <button onclick="updateModalState('milk', 'Oat')" data-milk="Oat" class="milk-btn flex-1 py-4 rounded-xl text-sm font-black transition-all ${milk==='Oat'?'bg-[#432818] text-[#E2CB9F] shadow-lg':'opacity-50'}">Oat (+$1)</button>
+                         </div>
+                    </div>
+                </div>` : ''}
+            <button id="modal-add-btn" onclick="addToCartFromModal()" ${isDisabled ? 'disabled' : ''} class="w-full bg-[#432818] text-[#E2CB9F] py-5 rounded-2xl font-black text-xl shadow-xl active:scale-95 transition-all ${isDisabled ? 'btn-disabled' : ''}">${isDisabled ? 'Select Flavor' : 'Add to Order'}</button>
+        </div>`;
+      lucide.createIcons();
+  }
 
   init();
 </script>
